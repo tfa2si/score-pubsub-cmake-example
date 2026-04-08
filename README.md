@@ -32,38 +32,54 @@ minimal_score_pubsub/
 
 ```bash
 git clone https://github.com/eclipse-score/communication.git
-cd communication
 ```
 
-### 2. Clone this example into the workspace
+### 2. Clone this repo (as a sibling)
 
 ```bash
-cd score/mw/com/example
-git clone <url-of-this-repo> minimal_score_pubsub
-cd ../../../..   # back to communication/
+git clone <url-of-this-repo> minimal_score_pubsub_cmake
+```
+
+Your directory layout should look like:
+```
+repos/
+├── communication/        ← Eclipse S-CORE middleware (Bazel)
+└── minimal_score_pubsub_cmake/   ← this repo (CMake app)
 ```
 
 ## Build
 
-### Step 1 — Build the middleware (once, results are cached)
+### Step 1 — Install the middleware sysroot (once)
+
+From inside `minimal_score_pubsub_cmake/`:
 
 ```bash
-bazel build //score/mw/com
+./install_sysroot.sh
 ```
 
-This compiles ~490 targets. Subsequent builds reuse the cache and finish in seconds.
+This will:
+- Build `//score/mw/com` via Bazel inside `../communication` (~490 targets, cached on repeat)
+- Pack all middleware objects into `sysroot/lib/libmw_com.a`
+- Install all headers to `sysroot/include/`
+- Generate `sysroot/lib/cmake/MwCom/MwComConfig.cmake`
 
-### Step 2 — Build the example
+If your communication repo is in a non-default location:
+```bash
+./install_sysroot.sh /path/to/communication [/path/to/sysroot]
+```
+
+### Step 2 — Build the example with CMake
 
 ```bash
-bazel build //score/mw/com/example/minimal_score_pubsub/...
+mkdir build && cd build
+cmake -DCMAKE_PREFIX_PATH="$(pwd)/../sysroot" ..
+make -j$(nproc)
 ```
 
-Only ~21 targets compile (your source files + linking). Binaries are placed under `bazel-bin/`:
-
+Binaries are placed in `build/`:
 ```
-bazel-bin/score/mw/com/example/minimal_score_pubsub/publisher
-bazel-bin/score/mw/com/example/minimal_score_pubsub/subscriber
+build/publisher
+build/subscriber
 ```
 
 ## Run
@@ -73,8 +89,7 @@ Open two terminals from the `communication/` directory.
 **Terminal 1 — Publisher:**
 
 ```bash
-bazel-bin/score/mw/com/example/minimal_score_pubsub/publisher \
-    score/mw/com/example/minimal_score_pubsub/etc/mw_com_config.json
+./build/publisher etc/mw_com_config.json
 ```
 
 Expected output:
@@ -89,8 +104,7 @@ Expected output:
 **Terminal 2 — Subscriber:**
 
 ```bash
-bazel-bin/score/mw/com/example/minimal_score_pubsub/subscriber \
-    score/mw/com/example/minimal_score_pubsub/etc/mw_com_config.json
+./build/subscriber etc/mw_com_config.json
 ```
 
 Expected output:
@@ -114,4 +128,4 @@ Stop either process with `Ctrl+C`.
 | Publisher side | `MotorAngleSkeleton::Create()` → `OfferService()` → `Allocate()` → `Send()` |
 | Subscriber side | `MotorAngleProxy::FindService()` → `Create()` → `Subscribe()` → `SetReceiveHandler()` |
 | Transport | Shared memory (SHM), configured in `etc/mw_com_config.json` |
-| Config | `instanceSpecifier: score/cp60/MapApiLanesStamped`, `serviceId: 6432`, `eventId: 3` |
+| Config | `instanceSpecifier: score/examples/MotorAngle`, `serviceId: 6432`, `eventId: 3` |

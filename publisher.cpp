@@ -1,7 +1,7 @@
 // Minimal Publisher using Eclipse S-Core MW / LoLA IPC
 // Offers a service and continuously sends MotorAngle samples.
 
-#include "score/mw/com/example/minimal_score_pubsub/datatype.h"
+#include "datatype.h"
 #include "score/mw/com/runtime.h"
 #include "score/mw/com/types.h"
 
@@ -40,7 +40,7 @@ int main(int argc, const char** argv)
 
     // Create and offer the service skeleton
     const auto instance_specifier_result =
-        score::mw::com::InstanceSpecifier::Create(std::string{"score/cp60/MapApiLanesStamped"});
+        score::mw::com::InstanceSpecifier::Create(std::string{"score/examples/MotorAngle"});
     if (!instance_specifier_result.has_value())
     {
         std::cerr << "Invalid instance specifier\n";

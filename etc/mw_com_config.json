@@ -1,7 +1,7 @@
 {
   "serviceTypes": [
     {
-      "serviceTypeName": "/score/adp/MapApiLanesStamped",
+      "serviceTypeName": "/score/examples/MotorAngle",
       "version": {
         "major": 1,
         "minor": 0
@@ -22,8 +22,8 @@
   ],
   "serviceInstances": [
     {
-      "instanceSpecifier": "score/cp60/MapApiLanesStamped",
-      "serviceTypeName": "/score/adp/MapApiLanesStamped",
+      "instanceSpecifier": "score/examples/MotorAngle",
+      "serviceTypeName": "/score/examples/MotorAngle",
       "version": {
         "major": 1,
         "minor": 0
