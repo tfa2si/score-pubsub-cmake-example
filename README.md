@@ -34,18 +34,19 @@ minimal_score_pubsub/
 git clone https://github.com/eclipse-score/communication.git
 ```
 
-### 2. Clone this repo (as a sibling)
+### 2. Clone this repo
 
 ```bash
 git clone <url-of-this-repo> minimal_score_pubsub_cmake
 ```
 
-Your directory layout should look like:
+In this workspace the repos live at:
 ```
-repos/
-├── communication/        ← Eclipse S-CORE middleware (Bazel)
-└── minimal_score_pubsub_cmake/   ← this repo (CMake app)
+~/score/communication/               ← Eclipse S-CORE middleware (Bazel)
+~/tfa2si/minimal_score_pubsub_cmake/ ← this repo (CMake app)
 ```
+
+> **Note:** The two repos are **not** siblings, so you must pass the communication path explicitly to `install_sysroot.sh` (see Step 1 below).
 
 ## Build
 
@@ -54,18 +55,21 @@ repos/
 From inside `minimal_score_pubsub_cmake/`:
 
 ```bash
-./install_sysroot.sh
+./install_sysroot.sh /path/to/score/communication
 ```
 
+> The default expects `../communication` (a sibling). If your communication repo
+> is elsewhere, pass the path explicitly as shown above (e.g. `/home/bluebox/score/communication`).
+
 This will:
-- Build `//score/mw/com` via Bazel inside `../communication` (~490 targets, cached on repeat)
+- Build `//score/mw/com` via Bazel inside the communication repo (~490 targets, cached on repeat)
 - Pack all middleware objects into `sysroot/lib/libmw_com.a`
 - Install all headers to `sysroot/include/`
 - Generate `sysroot/lib/cmake/MwCom/MwComConfig.cmake`
 
-If your communication repo is in a non-default location:
+General usage:
 ```bash
-./install_sysroot.sh /path/to/communication [/path/to/sysroot]
+./install_sysroot.sh [/path/to/communication [/path/to/sysroot]]
 ```
 
 ### Step 2 — Build the example with CMake
