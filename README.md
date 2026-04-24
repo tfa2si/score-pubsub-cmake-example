@@ -27,11 +27,25 @@ minimal_score_pubsub_cmake/
 
 ## Prerequisites
 
- [Bazel](https://bazel.build/) (tested with 8.x)
+- [Bazel](https://bazel.build/) (tested with 8.x)
 > ⚠️ **Note:** The Eclipse SCORE middleware (communication) repository may not be fully compatible with Bazel 8.x Bzlmod (MODULE.bazel) for all dependencies (e.g., `@score_logging`).
 > If you encounter errors about missing repositories, check for an updated version of the middleware or contact the maintainers for Bzlmod support.
 - C++17-capable compiler (GCC or Clang)
 - Linux host (shared memory IPC)
+
+### ARM64 cross-compilation prerequisites
+
+To build for ARM64 (e.g. Raspberry Pi 5) you need the aarch64 cross-toolchain and sysroot installed on your host. If your system lacks `gcc-aarch64-linux-gnu` or has a broken apt repository, use the bootstrap scripts from:
+
+**[tfa2si/bazel-aarch64-cross-bootstrap](https://github.com/tfa2si/bazel-aarch64-cross-bootstrap)**
+
+```bash
+git clone https://github.com/tfa2si/bazel-aarch64-cross-bootstrap
+cd bazel-aarch64-cross-bootstrap
+sudo bash bootstrap_aarch64_toolchain_sysroot.sh
+bash prepare_score_cross_env.sh /path/to/communication
+bash apply_score_cross_patches.sh /path/to/communication
+```
 
 ## Setup
 
