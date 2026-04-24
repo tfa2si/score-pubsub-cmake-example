@@ -11,79 +11,72 @@ middleware (`score::mw::com`). It demonstrates the full IPC lifecycle over share
 ## Repository layout
 
 ```
-minimal_score_pubsub/
-├── datatype.h / datatype.cpp   # MotorAngle struct + MotorAngleInterface/Proxy/Skeleton
-├── publisher.cpp               # Service skeleton: offers and sends samples
-├── subscriber.cpp              # Service proxy: finds, subscribes, receives samples
+minimal_score_pubsub_cmake/
+├── datatype.h / datatype.cpp      # MotorAngle struct + MotorAngleInterface/Proxy/Skeleton
+├── publisher.cpp                  # Service skeleton: offers and sends samples
+├── subscriber.cpp                 # Service proxy: finds, subscribes, receives samples
 ├── etc/
-│   └── mw_com_config.json      # Service instance manifest (SHM binding, event slots)
-└── BUILD                       # Bazel build targets
+│   └── mw_com_config.json         # Service instance manifest (SHM binding, event slots)
+├── build/
+│   └── score_mw_sysroot/          # Middleware sysroot (headers, libs, CMake config)
+├── setup_score_sysroot.sh         # Script to build/install the sysroot
+├── toolchain-arm64.cmake          # Example toolchain file for ARM cross-compilation
+├── CMakeLists.txt                 # CMake build configuration
+└── README.md
 ```
 
 ## Prerequisites
 
-- [Bazel](https://bazel.build/) (tested with 8.x)
+ [Bazel](https://bazel.build/) (tested with 8.x)
+> ⚠️ **Note:** The Eclipse SCORE middleware (communication) repository may not be fully compatible with Bazel 8.x Bzlmod (MODULE.bazel) for all dependencies (e.g., `@score_logging`).
+> If you encounter errors about missing repositories, check for an updated version of the middleware or contact the maintainers for Bzlmod support.
 - C++17-capable compiler (GCC or Clang)
 - Linux host (shared memory IPC)
 
 ## Setup
 
-### 1. Clone the middleware
+### 1. Clone the middleware repository
 
 ```bash
-git clone https://github.com/eclipse-score/communication.git
+git clone https://github.com/eclipse-score/communication /path/to/communication
 ```
 
-### 2. Clone this repo
+### 2. Build and install the middleware sysroot
+
+The `setup_score_sysroot.sh` script builds the middleware and installs headers + a fat static library into `build/score_mw_sysroot/`. You must pass the path to the cloned repository.
 
 ```bash
-git clone <url-of-this-repo> minimal_score_pubsub_cmake
+# x86 (host)
+./setup_score_sysroot.sh /path/to/communication
+
+# ARM64 cross-compilation
+./setup_score_sysroot.sh /path/to/communication --cpu=arm64
 ```
 
-In this workspace the repos live at:
-```
-~/score/communication/               ← Eclipse S-CORE middleware (Bazel)
-~/tfa2si/minimal_score_pubsub_cmake/ ← this repo (CMake app)
-```
+This produces the sysroot in `build/score_mw_sysroot/` (x86) or `build/score_mw_sysroot_arm64/` (ARM64).
 
-> **Note:** The two repos are **not** siblings, so you must pass the communication path explicitly to `install_sysroot.sh` (see Step 1 below).
-
-## Build
-
-### Step 1 — Install the middleware sysroot (once)
-
-From inside `minimal_score_pubsub_cmake/`:
+### 3. Build the example with CMake
 
 ```bash
-./install_sysroot.sh /path/to/score/communication
-```
+# x86
+mkdir -p build/cmake_build && cd build/cmake_build
+cmake -DCMAKE_PREFIX_PATH=$(pwd)/../score_mw_sysroot ../..
+make -j$(nproc)
 
-> The default expects `../communication` (a sibling). If your communication repo
-> is elsewhere, pass the path explicitly as shown above (e.g. `/home/bluebox/score/communication`).
-
-This will:
-- Build `//score/mw/com` via Bazel inside the communication repo (~490 targets, cached on repeat)
-- Pack all middleware objects into `sysroot/lib/libmw_com.a`
-- Install all headers to `sysroot/include/`
-- Generate `sysroot/lib/cmake/MwCom/MwComConfig.cmake`
-
-General usage:
-```bash
-./install_sysroot.sh [/path/to/communication [/path/to/sysroot]]
-```
-
-### Step 2 — Build the example with CMake
-
-```bash
-mkdir build && cd build
-cmake -DCMAKE_PREFIX_PATH="$(pwd)/../sysroot" ..
+# ARM64 (cross-compile)
+mkdir -p build/cmake_build_arm64 && cd build/cmake_build_arm64
+cmake -DCMAKE_PREFIX_PATH=$(pwd)/../score_mw_sysroot_arm64 \
+      -DCMAKE_TOOLCHAIN_FILE=../../toolchain-arm64.cmake ../..
 make -j$(nproc)
 ```
 
-Binaries are placed in `build/`:
+Binaries are placed in the respective build directory:
 ```
-build/publisher
-build/subscriber
+build/cmake_build/publisher
+build/cmake_build/subscriber
+
+build/cmake_build_arm64/publisher     (ARM64)
+build/cmake_build_arm64/subscriber    (ARM64)
 ```
 
 ## Run

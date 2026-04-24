@@ -1,5 +1,3 @@
 # CMake build directory
 build/
 
-# Generated middleware sysroot (run install_sysroot.sh to regenerate)
-sysroot/

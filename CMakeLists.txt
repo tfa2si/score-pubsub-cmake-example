@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
 # Find pre-installed score::mw::com (via install_sysroot.sh)
-# Set CMAKE_PREFIX_PATH to the sysroot, e.g.:
-#   cmake -DCMAKE_PREFIX_PATH=/path/to/sysroot ..
+# Set CMAKE_PREFIX_PATH to the score_mw_sysroot, e.g.:
+#   cmake -DCMAKE_PREFIX_PATH=/path/to/score_mw_sysroot ..
 # ---------------------------------------------------------------------------
 find_package(MwCom REQUIRED)
 
