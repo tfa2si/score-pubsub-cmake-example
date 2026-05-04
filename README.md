@@ -7,14 +7,18 @@ middleware (`score::mw::com`). It demonstrates the full IPC lifecycle over share
   (sinusoidal 90° amplitude at 1 Hz).
 - **Subscriber** — discovers the service, subscribes to the `motor_angle` event, and prints each
   received sample via an event-driven receive handler (no polling).
+- **TorqueSubscriber** — subscribes to a `MotorTorque` service and prints `torque_nm` samples;
+  intended as a companion to the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub)
+  MATLAB External Mode example where Simulink publishes `MotorTorque`.
 
 ## Repository layout
 
 ```
 minimal_score_pubsub_cmake/
-├── datatype.h / datatype.cpp      # MotorAngle struct + MotorAngleInterface/Proxy/Skeleton
-├── publisher.cpp                  # Service skeleton: offers and sends samples
-├── subscriber.cpp                 # Service proxy: finds, subscribes, receives samples
+├── datatype.h / datatype.cpp      # MotorAngle/MotorTorque structs + Interface/Proxy/Skeleton
+├── publisher.cpp                  # Service skeleton: offers and sends MotorAngle samples
+├── subscriber.cpp                 # Service proxy: finds, subscribes, receives MotorAngle samples
+├── torque_subscriber.cpp          # Service proxy: subscribes to MotorTorque (published by Simulink)
 ├── etc/
 │   └── mw_com_config.json         # Service instance manifest (SHM binding, event slots)
 ├── build/
@@ -88,14 +92,16 @@ Binaries are placed in the respective build directory:
 ```
 build/cmake_build/publisher
 build/cmake_build/subscriber
+build/cmake_build/torque_subscriber
 
-build/cmake_build_arm64/publisher     (ARM64)
-build/cmake_build_arm64/subscriber    (ARM64)
+build/cmake_build_arm64/publisher           (ARM64)
+build/cmake_build_arm64/subscriber          (ARM64)
+build/cmake_build_arm64/torque_subscriber   (ARM64)
 ```
 
 ## Run
 
-Open two terminals from the `communication/` directory.
+Open terminals from the project directory.
 
 **Terminal 1 — Publisher:**
 
@@ -128,7 +134,26 @@ Expected output:
 ...
 ```
 
-Stop either process with `Ctrl+C`.
+**Terminal 3 — Torque Subscriber** (used with the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) MATLAB example):
+
+Start this when a `MotorTorque` publisher is running (e.g. the Simulink `scorePubSub` app in
+External Mode). The subscriber waits until the service appears:
+
+```bash
+./build/torque_subscriber etc/mw_com_config.json
+```
+
+Expected output:
+```
+[TorqueSubscriber] Looking for service...
+[TorqueSubscriber] Service found. Connecting...
+[TorqueSubscriber] Subscribed. Waiting for events...
+[TorqueSubscriber] Received motor torque [Nm]: 0.5
+[TorqueSubscriber] Received motor torque [Nm]: 1.2
+...
+```
+
+Stop any process with `Ctrl+C`.
 
 ## How it works
 
@@ -138,5 +163,8 @@ Stop either process with `Ctrl+C`.
 | Data type | `MotorAngle` — plain struct with `float angle_deg` |
 | Publisher side | `MotorAngleSkeleton::Create()` → `OfferService()` → `Allocate()` → `Send()` |
 | Subscriber side | `MotorAngleProxy::FindService()` → `Create()` → `Subscribe()` → `SetReceiveHandler()` |
+| Torque subscriber | `MotorTorqueProxy::FindService()` → `Create()` → `Subscribe()` → `SetReceiveHandler()` |
+| Torque data type | `MotorTorque` — plain struct with `float torque_nm`; published by Simulink in [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) |
 | Transport | Shared memory (SHM), configured in `etc/mw_com_config.json` |
 | Config | `instanceSpecifier: score/examples/MotorAngle`, `serviceId: 6432`, `eventId: 3` |
+| Torque config | `instanceSpecifier: score/examples/MotorTorque` (see `etc/mw_com_config.json`) |

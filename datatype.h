@@ -45,6 +45,33 @@ class MotorAngleInterface : public Trait::Base
 using MotorAngleProxy = AsProxy<MotorAngleInterface>;
 using MotorAngleSkeleton = AsSkeleton<MotorAngleInterface>;
 
+struct MotorTorque
+{
+    MotorTorque() = default;
+
+    MotorTorque(MotorTorque&&) = default;
+
+    MotorTorque(const MotorTorque&) = default;
+
+    MotorTorque& operator=(MotorTorque&&) = default;
+
+    MotorTorque& operator=(const MotorTorque&) = default;
+
+    float torque_nm{0.0F};
+};
+
+template <typename Trait>
+class MotorTorqueInterface : public Trait::Base
+{
+  public:
+    using Trait::Base::Base;
+
+    typename Trait::template Event<MotorTorque> motor_torque_{*this, "motor_torque"};
+};
+
+using MotorTorqueProxy = AsProxy<MotorTorqueInterface>;
+using MotorTorqueSkeleton = AsSkeleton<MotorTorqueInterface>;
+
 }  // namespace score::mw::com
 
 #endif  // SCORE_MINIMAL_SCORE_PUBSUB_DATATYPE_H

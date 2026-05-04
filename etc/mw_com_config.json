@@ -18,6 +18,25 @@
           ]
         }
       ]
+    },
+    {
+      "serviceTypeName": "/score/examples/MotorTorque",
+      "version": {
+        "major": 1,
+        "minor": 0
+      },
+      "bindings": [
+        {
+          "binding": "SHM",
+          "serviceId": 6433,
+          "events": [
+            {
+              "eventName": "motor_torque",
+              "eventId": 4
+            }
+          ]
+        }
+      ]
     }
   ],
   "serviceInstances": [
@@ -48,6 +67,38 @@
           "events": [
             {
               "eventName": "motor_angle",
+              "numberOfSampleSlots": 30,
+              "maxSubscribers": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "instanceSpecifier": "score/examples/MotorTorque",
+      "serviceTypeName": "/score/examples/MotorTorque",
+      "version": {
+        "major": 1,
+        "minor": 0
+      },
+      "instances": [
+        {
+          "instanceId": 1,
+          "allowedConsumer": {
+            "QM": [
+              0
+            ]
+          },
+          "allowedProvider": {
+            "QM": [
+              0
+            ]
+          },
+          "asil-level": "QM",
+          "binding": "SHM",
+          "events": [
+            {
+              "eventName": "motor_torque",
               "numberOfSampleSlots": 30,
               "maxSubscribers": 5
             }

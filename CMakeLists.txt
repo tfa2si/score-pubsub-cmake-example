@@ -55,3 +55,9 @@ target_link_libraries(publisher PRIVATE datatype)
 # ---------------------------------------------------------------------------
 add_executable(subscriber subscriber.cpp)
 target_link_libraries(subscriber PRIVATE datatype)
+
+# ---------------------------------------------------------------------------
+# Torque Subscriber
+# ---------------------------------------------------------------------------
+add_executable(torque_subscriber torque_subscriber.cpp)
+target_link_libraries(torque_subscriber PRIVATE datatype)
