@@ -8,8 +8,8 @@ middleware (`score::mw::com`). It demonstrates the full IPC lifecycle over share
 - **Subscriber** — discovers the service, subscribes to the `motor_angle` event, and prints each
   received sample via an event-driven receive handler (no polling).
 - **TorqueSubscriber** — subscribes to a `MotorTorque` service and prints `torque_nm` samples;
-  intended as a companion to the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub)
-  MATLAB External Mode example where Simulink publishes `MotorTorque`.
+  intended as a companion to the `example_scorePubSub` MATLAB External Mode example
+  where Simulink publishes `MotorTorque`.
 
 For a detailed walkthrough of the manual build process, prerequisites, and how the patching works,
 see [README_advanced.md](README_advanced.md).
@@ -122,7 +122,7 @@ cd ~/score_pubsub
 ...
 ```
 
-**Terminal 3 — Torque Subscriber** (used with the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) MATLAB External Mode example):
+**Terminal 3 — Torque Subscriber** (used with the `example_scorePubSub` MATLAB External Mode example):
 ```bash
 cd ~/score_pubsub
 ./torque_subscriber etc/mw_com_config.json
@@ -143,7 +143,7 @@ Stop any process with `Ctrl+C`.
 | Publisher side | `MotorAngleSkeleton::Create()` → `OfferService()` → `Allocate()` → `Send()` |
 | Subscriber side | `MotorAngleProxy::FindService()` → `Create()` → `Subscribe()` → `SetReceiveHandler()` |
 | Torque subscriber | `MotorTorqueProxy::FindService()` → `Create()` → `Subscribe()` → `SetReceiveHandler()` |
-| Torque data type | `MotorTorque` — plain struct with `float torque_nm`; published by Simulink in [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) |
+| Torque data type | `MotorTorque` — plain struct with `float torque_nm`; published by Simulink in `example_scorePubSub` |
 | Transport | Shared memory (SHM), configured in `etc/mw_com_config.json` |
 | Config | `instanceSpecifier: score/examples/MotorAngle`, `serviceId: 6432`, `eventId: 3` |
 | Torque config | `instanceSpecifier: score/examples/MotorTorque` (see `etc/mw_com_config.json`) |
