@@ -347,14 +347,23 @@ BAZEL_OUT_DIR=$(get_bazel_out_dir)
 BAZEL_CACHE_DIR=$(dirname "$BAZEL_OUT_DIR")/execroot/_main
 
 # Collect objects from bazel-bin (main + external repos)
-# ARM64 cross-toolchain produces .o; x86 Bazel produces .pic.o
-find -L "$BAZEL_OUT_DIR" \( -name "*.pic.o" -o -name "*.o" \) \
-    ! -path "*/example/*" \
-    ! -path "*/test/*"    \
-    ! -path "*/tests/*"   \
-    ! -name "*_test.pic.o" \
-    ! -name "*_test.o" \
-    > "${OBJ_LIST}"
+# ARM64 cross-toolchain produces .o only; x86 Bazel produces .pic.o.
+# When cross-compiling, exclude .pic.o to avoid picking up stale x86 artifacts.
+if [[ -n "$BAZEL_CPU" ]]; then
+    find -L "$BAZEL_OUT_DIR" -name "*.o" ! -name "*.pic.o" \
+        ! -path "*/example/*" \
+        ! -path "*/test/*"    \
+        ! -path "*/tests/*"   \
+        ! -name "*_test.o" \
+        > "${OBJ_LIST}"
+else
+    find -L "$BAZEL_OUT_DIR" -name "*.pic.o" \
+        ! -path "*/example/*" \
+        ! -path "*/test/*"    \
+        ! -path "*/tests/*"   \
+        ! -name "*_test.pic.o" \
+        > "${OBJ_LIST}"
+fi
 
 OBJ_COUNT=$(wc -l < "${OBJ_LIST}")
 echo "    Found ${OBJ_COUNT} object files"
@@ -379,6 +388,7 @@ echo "==> Building ${FAT_ARCHIVE} ..."
 mapfile -t OBJ_FILES < "${OBJ_LIST}"
 rm -f "${OBJ_LIST}"
 
+rm -f "${FAT_ARCHIVE}"  # ensure no stale members from a previous build
 ar rcs "${FAT_ARCHIVE}" "${OBJ_FILES[@]}"
 
 # Workaround for linker error: remove object file with main() from libmw_com.a (must be after archive creation)
