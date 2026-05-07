@@ -12,7 +12,7 @@
 #   --link=static|shared      Linking mode (default: interactive)
 #   --comm-repo=PATH          Path to eclipse-score/communication repo
 #   --skip-sysroot            Skip rebuilding the middleware sysroot
-#   --clean-cache=yes|no     Clean Bazel cache before sysroot build (default: interactive)
+#   --clean-cache=yes|no     Clean Bazel cache before sysroot build (default: no)
 #   --deploy=yes|no           Deploy to remote target after build
 #   --target=USER@HOST        SSH target for deployment (e.g. pi@192.168.1.10)
 #   --deploy-dir=PATH         Remote directory to deploy to (default: ~/score_pubsub)
@@ -101,6 +101,10 @@ ask_choice() {
     while true; do
         ask "$varname" "$question ($joined)" "$default"
         local val="${!varname}"
+        # Expand single-letter shortcuts: y->yes, n->no
+        [[ "$val" == "y" ]] && val="yes"
+        [[ "$val" == "n" ]] && val="no"
+        printf -v "$varname" '%s' "$val"
         for c in "${choices[@]}"; do
             [[ "$val" == "$c" ]] && return
         done
@@ -295,7 +299,7 @@ fi
 if [[ $OPT_SKIP_SYSROOT -eq 0 ]]; then
     # Ask about Bazel cache clean
     if [[ -z "$OPT_CLEAN_CACHE" ]]; then
-        ask_choice OPT_CLEAN_CACHE "Clean Bazel cache before sysroot build?" "yes" "no"
+        ask_choice OPT_CLEAN_CACHE "Clean Bazel cache before sysroot build?" "no" "yes"
     fi
     case "$OPT_CLEAN_CACHE" in
         yes|no) ;;
@@ -306,7 +310,7 @@ if [[ $OPT_SKIP_SYSROOT -eq 0 ]]; then
     echo "==> Building middleware sysroot ..."
     cd "$SCRIPT_DIR"
     CLEAN_FLAG=""
-    [[ "$OPT_CLEAN_CACHE" == "no" ]] && CLEAN_FLAG="--no-clean"
+    [[ "$OPT_CLEAN_CACHE" == "yes" ]] && CLEAN_FLAG="--clean"
     bash setup_score_sysroot.sh "$OPT_COMM_REPO" ${CPU_FLAG:+"$CPU_FLAG"} ${CLEAN_FLAG:+"$CLEAN_FLAG"}
 fi
 

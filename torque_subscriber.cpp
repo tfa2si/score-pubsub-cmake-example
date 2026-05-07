@@ -28,7 +28,7 @@ int main(int argc, const char** argv)
     // Initialize LoLA runtime with the service instance manifest
     if (argc > 1)
     {
-        score::StringLiteral runtime_args[2u] = {"--service_instance_manifest", argv[1]};
+        const char* runtime_args[2u] = {"--service_instance_manifest", argv[1]};
         score::mw::com::runtime::InitializeRuntime(2, runtime_args);
     }
     else

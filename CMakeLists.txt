@@ -4,6 +4,8 @@ project(minimal_score_pubsub LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Suppress deprecation warnings from upstream score headers (StringLiteral etc.)
+add_compile_options(-Wno-deprecated-declarations)
 # ---------------------------------------------------------------------------
 # score::mw::com sysroot — set via cmake -DSCORE_MW_SYSROOT=/path/to/sysroot
 # or via CMAKE_PREFIX_PATH for find_package compatibility.

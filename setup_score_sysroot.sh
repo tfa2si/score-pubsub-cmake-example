@@ -14,6 +14,7 @@
 #   ./setup_score_sysroot.sh                          # x86 build, auto-clone repo
 #   ./setup_score_sysroot.sh /path/to/communication   # x86 build, existing repo
 #   ./setup_score_sysroot.sh /path/to/communication --cpu=arm64  # ARM64 cross-build
+#   ./setup_score_sysroot.sh /path/to/communication --clean      # force bazel clean first
 
 
 set -euo pipefail
@@ -31,13 +32,13 @@ fi
 
 # Parse --cpu and --no-clean arguments
 BAZEL_CPU=""
-SKIP_BAZEL_CLEAN=0
+SKIP_BAZEL_CLEAN=1
 OTHER_ARGS=()
 for arg in "$@"; do
     if [[ "$arg" == --cpu=* ]]; then
         BAZEL_CPU="--cpu=arm64"  # This line is modified to always use aarch64
-    elif [[ "$arg" == --no-clean ]]; then
-        SKIP_BAZEL_CLEAN=1
+    elif [[ "$arg" == --clean ]]; then
+        SKIP_BAZEL_CLEAN=0
     else
         OTHER_ARGS+=("$arg")
     fi
@@ -110,9 +111,7 @@ echo "==> Applying cross-compilation patches to comm repo ..."
 if [[ ! -d "${COMM_REPO}/platforms" ]]; then
     SRC_PLATFORMS=""
     for candidate in \
-        "${SCRIPT_DIR}/../hello_world_bazel_cross_comp/platforms" \
-        "${SCRIPT_DIR}/../bazel_cross_comp_test/platforms" \
-        "${SCRIPT_DIR}/../test/communication/platforms"; do
+        "${SCRIPT_DIR}/platforms"; do
         [[ -d "$candidate" ]] && SRC_PLATFORMS="$candidate" && break
     done
     if [[ -n "$SRC_PLATFORMS" ]]; then
@@ -127,8 +126,7 @@ fi
 if [[ ! -f "${COMM_REPO}/toolchain/cc_toolchain_config.bzl" ]]; then
     SRC_TOOLCHAIN=""
     for candidate in \
-        "${SCRIPT_DIR}/../test/communication/toolchain" \
-        "${SCRIPT_DIR}/../hello_world_bazel_cross_comp/toolchain"; do
+        "${SCRIPT_DIR}/toolchain"; do
         [[ -f "${candidate}/cc_toolchain_config.bzl" ]] && SRC_TOOLCHAIN="$candidate" && break
     done
     if [[ -n "$SRC_TOOLCHAIN" ]]; then
@@ -143,7 +141,7 @@ fi
 # 0c. local_libs/ — local ACL library
 if [[ ! -d "${COMM_REPO}/local_libs" ]]; then
     for candidate in \
-        "${SCRIPT_DIR}/../test/communication/local_libs"; do
+        "${SCRIPT_DIR}/local_libs"; do
         if [[ -d "$candidate" ]]; then
             cp -r "$candidate" "${COMM_REPO}/local_libs"
             echo "    local_libs/ copied from ${candidate}"
@@ -202,11 +200,11 @@ with open(path, 'w') as f:
 print("    MODULE.bazel: patched OK")
 PYEOF
 
-# 0e. .bazelrc — suppress deprecated-declarations warning-as-error
-if ! grep -q 'Wno-error=deprecated-declarations' "${COMM_REPO}/.bazelrc" 2>/dev/null; then
-    echo 'build --copt=-Wno-error=deprecated-declarations' >> "${COMM_REPO}/.bazelrc"
-    echo "    .bazelrc: added -Wno-error=deprecated-declarations"
-fi
+# 0e. .bazelrc — suppress deprecated-declarations warnings
+grep -qxF 'build --copt=-Wno-error=deprecated-declarations' "${COMM_REPO}/.bazelrc" 2>/dev/null || \
+    { echo 'build --copt=-Wno-error=deprecated-declarations' >> "${COMM_REPO}/.bazelrc"; echo "    .bazelrc: added -Wno-error=deprecated-declarations"; }
+grep -qxF 'build --copt=-Wno-deprecated-declarations' "${COMM_REPO}/.bazelrc" 2>/dev/null || \
+    { echo 'build --copt=-Wno-deprecated-declarations' >> "${COMM_REPO}/.bazelrc"; echo "    .bazelrc: added -Wno-deprecated-declarations"; }
 
 # 0f. tracing_runtime.cpp — replace StdVariantType with direct field assignment
 TRACING="${COMM_REPO}/score/mw/com/impl/bindings/lola/tracing/tracing_runtime.cpp"
@@ -297,7 +295,7 @@ if [[ $SKIP_BAZEL_CLEAN -eq 0 ]]; then
         bazel clean
     fi
 else
-    echo "==> Skipping Bazel cache clean (--no-clean)."
+    echo "==> Skipping Bazel cache clean (use --clean to force)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -312,14 +310,20 @@ echo "==> Building transitive C++ deps (score_baselibs, plumbing) ..."
 # They provide symbols referenced by objects in the fat archive.
 # Note: @score_logging is a transitive dep — not directly accessible in Bzlmod.
 # Its objects are already built as part of //score/mw/com above.
+BASELIBS_TARGETS=(
+    @score_baselibs//score/mw/log/detail:thread_local_guard
+    @score_baselibs//score/mw/log/detail:log_recorder_factory
+    @score_baselibs//score/mw/log/detail:empty_recorder_factory
+    @score_baselibs//score/memory/shared:shared_memory_factory_impl
+    @score_baselibs//score/memory/shared:shared_memory_factory
+    @score_baselibs//score/os/utils:path
+)
+# console_only_recorder_factory only exists in the local score_baselibs fork
+if [[ -d "$SCORE_BASELIBS_ABS" ]]; then
+    BASELIBS_TARGETS+=(@score_baselibs//score/mw/log/detail:console_only_recorder_factory)
+fi
 bazel build $BAZEL_CONFIG \
-    @score_baselibs//score/mw/log/detail:thread_local_guard \
-    @score_baselibs//score/mw/log/detail:log_recorder_factory \
-    @score_baselibs//score/mw/log/detail:empty_recorder_factory \
-    @score_baselibs//score/mw/log/detail:console_only_recorder_factory \
-    @score_baselibs//score/memory/shared:shared_memory_factory_impl \
-    @score_baselibs//score/memory/shared:shared_memory_factory \
-    @score_baselibs//score/os/utils:path \
+    "${BASELIBS_TARGETS[@]}" \
     //score/mw/com/impl/plumbing:proxy_binding_factory_impl \
     //score/mw/com/impl/plumbing:skeleton_binding_factory_impl \
     //score/mw/com/impl/bindings/lola:path_builder \
