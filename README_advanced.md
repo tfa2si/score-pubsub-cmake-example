@@ -83,17 +83,18 @@ are described here.
 
 ### 2a. Add cross-toolchain and platform definitions
 
-The upstream repo does not ship a cross-toolchain for `aarch64-linux-gnu`.  Copy the
-required files into the repo:
+The upstream repo does not ship a cross-toolchain for `aarch64-linux-gnu`. The required
+files are bundled in this repo (`platforms/`, `toolchain/`, `local_libs/`) and are copied
+automatically by `setup_score_sysroot.sh --cpu=arm64`. No manual step is needed.
+
+If you need to copy them manually:
 
 ```bash
 COMM=~/score/communication
-# Platform constraint definitions (//platforms:rpi5_aarch64)
-cp -r /path/to/platforms/      "$COMM/platforms/"
-# Bazel CC toolchain for aarch64-linux-gnu
-cp -r /path/to/toolchain/      "$COMM/toolchain/"
-# Local ACL library (required by score_baselibs for ARM64)
-cp -r /path/to/local_libs/     "$COMM/local_libs/"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cp -r "$SCRIPT_DIR/platforms/"   "$COMM/platforms/"
+cp -r "$SCRIPT_DIR/toolchain/"   "$COMM/toolchain/"
+cp -r "$SCRIPT_DIR/local_libs/"  "$COMM/local_libs/"
 ```
 
 ### 2b. Register toolchain and overrides in MODULE.bazel
@@ -306,6 +307,6 @@ The patches currently applied and their guard conditions:
 | `tracing/tracing_runtime.cpp` | `StdVariantType element_variant` present | Replace with direct field assignment |
 | `service_discovery/flag_file.cpp` | `score::Result<void> result{}` present | Replace with `score::ResultBlank` |
 | `example/ipc_bridge/BUILD` | `console_only_backend` dep missing | Add the dep |
-| `platforms/` dir | directory missing | Copy from local bootstrap |
-| `toolchain/` dir | `cc_toolchain_config.bzl` missing | Copy from local bootstrap |
-| `local_libs/` dir | directory missing | Copy from local bootstrap |
+| `platforms/` dir | directory missing | Copied automatically from bundled `platforms/` in this repo |
+| `toolchain/` dir | `cc_toolchain_config.bzl` missing | Copied automatically from bundled `toolchain/` in this repo |
+| `local_libs/` dir | directory missing | Copied automatically from bundled `local_libs/` in this repo |

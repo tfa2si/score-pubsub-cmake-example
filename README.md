@@ -169,11 +169,10 @@ update the patches for the new commit.
 ### `ERROR: no such package 'platforms'`
 
 The `platforms/` directory is missing from the communication repo. Run the sysroot script
-once — it will copy it automatically. Or copy it manually:
+once — it will copy it automatically from the bundled `platforms/` in this repo:
 
 ```bash
-cp -r /path/to/minimal_score_pubsub_cmake/../hello_world_bazel_cross_comp/platforms \
-    ~/score/communication/platforms
+./setup_score_sysroot.sh ~/score/communication --cpu=arm64
 ```
 
 ### `error: could not convert … from 'StdVariantType' to 'VariantType'`
