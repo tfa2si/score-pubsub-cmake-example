@@ -25,10 +25,22 @@ if(NOT DEFINED SCORE_MW_SYSROOT)
 endif()
 
 set(SCORE_MW_INCLUDE_DIR "${SCORE_MW_SYSROOT}/include")
-set(SCORE_MW_LIB        "${SCORE_MW_SYSROOT}/lib/libmw_com.a")
 
-if(NOT EXISTS "${SCORE_MW_LIB}")
-    message(FATAL_ERROR "libmw_com.a not found at ${SCORE_MW_LIB}. Run setup_score_sysroot.sh first.")
+option(SCORE_MW_SHARED "Link against shared library libmw_com.so instead of static libmw_com.a" OFF)
+
+if(SCORE_MW_SHARED)
+    set(SCORE_MW_LIB "${SCORE_MW_SYSROOT}/lib/libmw_com.so")
+    if(NOT EXISTS "${SCORE_MW_LIB}")
+        message(FATAL_ERROR "libmw_com.so not found at ${SCORE_MW_LIB}. Run setup_score_sysroot.sh first.")
+    endif()
+    # Embed the sysroot lib path so the .so is found at runtime
+    set(CMAKE_INSTALL_RPATH "${SCORE_MW_SYSROOT}/lib")
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+else()
+    set(SCORE_MW_LIB "${SCORE_MW_SYSROOT}/lib/libmw_com.a")
+    if(NOT EXISTS "${SCORE_MW_LIB}")
+        message(FATAL_ERROR "libmw_com.a not found at ${SCORE_MW_LIB}. Run setup_score_sysroot.sh first.")
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

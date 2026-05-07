@@ -11,6 +11,9 @@ middleware (`score::mw::com`). It demonstrates the full IPC lifecycle over share
   intended as a companion to the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub)
   MATLAB External Mode example where Simulink publishes `MotorTorque`.
 
+For a detailed walkthrough of the manual build process, prerequisites, and how the patching works,
+see [README_advanced.md](README_advanced.md).
+
 ## Repository layout
 
 ```
@@ -23,133 +26,109 @@ minimal_score_pubsub_cmake/
 │   └── mw_com_config.json         # Service instance manifest (SHM binding, event slots)
 ├── build/
 │   └── score_mw_sysroot/          # Middleware sysroot (headers, libs, CMake config)
-├── setup_score_sysroot.sh         # Script to build/install the sysroot
-├── toolchain-arm64.cmake          # Example toolchain file for ARM cross-compilation
+├── setup_score_sysroot.sh         # Builds the middleware sysroot (auto-applies patches)
+├── build_and_deploy.sh            # Interactive build + deploy script (recommended entry point)
+├── toolchain-arm64.cmake          # ARM64 cross-compilation toolchain file
 ├── CMakeLists.txt                 # CMake build configuration
 └── README.md
 ```
 
 ## Prerequisites
 
-- [Bazel](https://bazel.build/) (tested with 8.x)
-> ⚠️ **Note:** The Eclipse SCORE middleware (communication) repository may not be fully compatible with Bazel 8.x Bzlmod (MODULE.bazel) for all dependencies (e.g., `@score_logging`).
-> If you encounter errors about missing repositories, check for an updated version of the middleware or contact the maintainers for Bzlmod support.
+- [Bazel](https://bazel.build/) 8.x
 - C++17-capable compiler (GCC or Clang)
 - Linux host (shared memory IPC)
 
-### ARM64 cross-compilation prerequisites
+For ARM64 cross-compilation (e.g. Raspberry Pi 5), you also need the `aarch64-linux-gnu` cross-toolchain.
+See [README_advanced.md](README_advanced.md#arm64-cross-compilation-prerequisites) for setup instructions.
 
-To build for ARM64 (e.g. Raspberry Pi 5) you need the aarch64 cross-toolchain and sysroot installed on your host. If your system lacks `gcc-aarch64-linux-gnu` or has a broken apt repository, use the bootstrap scripts from:
+> **Tested communication repo commit:**
+> [`1e03b3110c120ae3f9aff07a366ba8c99cf267d3`](https://github.com/eclipse-score/communication/commit/1e03b3110c120ae3f9aff07a366ba8c99cf267d3)
+> (2026-05-06 — *Adding clang-tidy checks*)
+> If the upstream repo has been updated past this commit, the sysroot patches in
+> `setup_score_sysroot.sh` may need updating. See the
+> [Troubleshooting](#sysroot-build-fails-after-a-git-pull-on-the-communication-repo) section.
 
-**[tfa2si/bazel-aarch64-cross-bootstrap](https://github.com/tfa2si/bazel-aarch64-cross-bootstrap)**
+## Quick start — `build_and_deploy.sh`
 
-```bash
-git clone https://github.com/tfa2si/bazel-aarch64-cross-bootstrap
-cd bazel-aarch64-cross-bootstrap
-sudo bash bootstrap_aarch64_toolchain_sysroot.sh
-bash prepare_score_cross_env.sh /path/to/communication
-bash apply_score_cross_patches.sh /path/to/communication
-```
-
-## Setup
-
-### 1. Clone the middleware repository
+The recommended way to build (and optionally deploy to a remote target) is via the interactive script:
 
 ```bash
-git clone https://github.com/eclipse-score/communication /path/to/communication
+./build_and_deploy.sh
 ```
 
-### 2. Build and install the middleware sysroot
+The script will guide you through:
+1. Target architecture (`x86` or `arm`)
+2. Linking mode (`static` or `shared`)
+3. Whether to (re)build the middleware sysroot, and which communication repo to use
+4. Whether to clean the Bazel cache before building
+5. Whether to deploy the binaries to a remote SSH target
 
-The `setup_score_sysroot.sh` script builds the middleware and installs headers + a fat static library into `build/score_mw_sysroot/`. You must pass the path to the cloned repository.
+### Non-interactive usage
 
 ```bash
-# x86 (host)
-./setup_score_sysroot.sh /path/to/communication
+# ARM static build, no deploy
+./build_and_deploy.sh --arch=arm --link=static --deploy=no
 
-# ARM64 cross-compilation
-./setup_score_sysroot.sh /path/to/communication --cpu=arm64
+# ARM static build, skip sysroot rebuild, deploy to Pi
+./build_and_deploy.sh --arch=arm --link=static --skip-sysroot \
+    --deploy=yes --target=pi@192.168.1.10
+
+# ARM shared build, deploy to Pi, fully non-interactive
+./build_and_deploy.sh --arch=arm --link=shared --clean-cache=no \
+    --deploy=yes --target=pi@192.168.1.10 -y
 ```
 
-This produces the sysroot in `build/score_mw_sysroot/` (x86) or `build/score_mw_sysroot_arm64/` (ARM64).
+All options:
 
-### 3. Build the example with CMake
-
-```bash
-# x86
-mkdir -p build/cmake_build && cd build/cmake_build
-cmake -DCMAKE_PREFIX_PATH=$(pwd)/../score_mw_sysroot ../..
-make -j$(nproc)
-
-# ARM64 (cross-compile)
-mkdir -p build/cmake_build_arm64 && cd build/cmake_build_arm64
-cmake -DCMAKE_PREFIX_PATH=$(pwd)/../score_mw_sysroot_arm64 \
-      -DCMAKE_TOOLCHAIN_FILE=../../toolchain-arm64.cmake ../..
-make -j$(nproc)
-```
-
-Binaries are placed in the respective build directory:
-```
-build/cmake_build/publisher
-build/cmake_build/subscriber
-build/cmake_build/torque_subscriber
-
-build/cmake_build_arm64/publisher           (ARM64)
-build/cmake_build_arm64/subscriber          (ARM64)
-build/cmake_build_arm64/torque_subscriber   (ARM64)
-```
+| Option | Description |
+|---|---|
+| `--arch=x86\|arm` | Target architecture |
+| `--link=static\|shared` | Linking mode |
+| `--comm-repo=PATH` | Path to eclipse-score/communication repo |
+| `--skip-sysroot` | Skip rebuilding the middleware sysroot |
+| `--clean-cache=yes\|no` | Clean Bazel cache before sysroot build |
+| `--deploy=yes\|no` | Deploy to remote target after build |
+| `--target=USER@HOST` | SSH target (e.g. `pi@192.168.1.10`) |
+| `--deploy-dir=PATH` | Remote deploy directory (default: `~/score_pubsub`) |
+| `-y`, `--yes` | Accept all defaults non-interactively |
+| `-h`, `--help` | Show help and exit |
 
 ## Run
 
-Open terminals from the project directory.
+After building, open two terminals on the target device (or locally for x86):
 
 **Terminal 1 — Publisher:**
-
 ```bash
-./build/publisher etc/mw_com_config.json
+cd ~/score_pubsub
+./publisher etc/mw_com_config.json
 ```
-
-Expected output:
 ```
 [Publisher] Service offered. Sending data...
 [Publisher] Sent motor angle [deg]: 0
 [Publisher] Sent motor angle [deg]: 27.5664
-[Publisher] Sent motor angle [deg]: 52.9919
 ...
 ```
 
 **Terminal 2 — Subscriber:**
-
 ```bash
-./build/subscriber etc/mw_com_config.json
+cd ~/score_pubsub
+./subscriber etc/mw_com_config.json
 ```
-
-Expected output:
 ```
-[Subscriber] Looking for service...
 [Subscriber] Service found. Connecting...
-[Subscriber] Subscribed. Waiting for events...
 [Subscriber] Received motor angle [deg]: 0
 [Subscriber] Received motor angle [deg]: 27.5664
 ...
 ```
 
-**Terminal 3 — Torque Subscriber** (used with the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) MATLAB example):
-
-Start this when a `MotorTorque` publisher is running (e.g. the Simulink `scorePubSub` app in
-External Mode). The subscriber waits until the service appears:
-
+**Terminal 3 — Torque Subscriber** (used with the [example_scorePubSub](https://github.boschdevcloud.com/bios-integration-of-xDomain-systems/matlab-external-mode-mix/tree/main/examples/example_scorePubSub) MATLAB External Mode example):
 ```bash
-./build/torque_subscriber etc/mw_com_config.json
+cd ~/score_pubsub
+./torque_subscriber etc/mw_com_config.json
 ```
-
-Expected output:
 ```
-[TorqueSubscriber] Looking for service...
-[TorqueSubscriber] Service found. Connecting...
-[TorqueSubscriber] Subscribed. Waiting for events...
 [TorqueSubscriber] Received motor torque [Nm]: 0.5
-[TorqueSubscriber] Received motor torque [Nm]: 1.2
 ...
 ```
 
@@ -168,3 +147,88 @@ Stop any process with `Ctrl+C`.
 | Transport | Shared memory (SHM), configured in `etc/mw_com_config.json` |
 | Config | `instanceSpecifier: score/examples/MotorAngle`, `serviceId: 6432`, `eventId: 3` |
 | Torque config | `instanceSpecifier: score/examples/MotorTorque` (see `etc/mw_com_config.json`) |
+
+## Troubleshooting
+
+### Sysroot build fails after a `git pull` on the communication repo
+
+The patches applied by `setup_score_sysroot.sh` were tested against a specific commit.
+If the upstream repo has moved past it, the build may fail with compile or Bazel errors.
+
+**First, pin to the tested commit and retry:**
+
+```bash
+git -C ~/score/communication checkout 1e03b3110c120ae3f9aff07a366ba8c99cf267d3
+./setup_score_sysroot.sh ~/score/communication --cpu=arm64
+```
+
+If that succeeds, the issue is a newer upstream change. See
+[README_advanced.md — Patch maintenance](README_advanced.md#patch-maintenance) for how to
+update the patches for the new commit.
+
+### `ERROR: no such package 'platforms'`
+
+The `platforms/` directory is missing from the communication repo. Run the sysroot script
+once — it will copy it automatically. Or copy it manually:
+
+```bash
+cp -r /path/to/minimal_score_pubsub_cmake/../hello_world_bazel_cross_comp/platforms \
+    ~/score/communication/platforms
+```
+
+### `error: could not convert … from 'StdVariantType' to 'VariantType'`
+
+The `tracing_runtime.cpp` patch is needed but was not applied. Delete the communication
+repo's Bazel cache and re-run the sysroot script (it will patch and rebuild):
+
+```bash
+bazel -C ~/score/communication clean
+./setup_score_sysroot.sh ~/score/communication --cpu=arm64
+```
+
+### `undefined reference to score::os::Path::Default`
+
+The `@score_baselibs//score/os/utils:path` target is missing from the fat library. This is
+fixed in `setup_score_sysroot.sh` — make sure you have the latest version of the script and
+rebuild the sysroot.
+
+### `syntax error at '\': expected expression` in MODULE.bazel
+
+A previous run left literal `\n` sequences in `MODULE.bazel` (shell quoting issue). Fix:
+
+```bash
+python3 - ~/score/communication/MODULE.bazel <<'EOF'
+import sys
+path = sys.argv[1]
+with open(path) as f: src = f.read()
+src = src.replace('\\n', '\n')
+with open(path, 'w') as f: f.write(src)
+print("Fixed")
+EOF
+```
+
+Then re-run the sysroot script.
+
+### Binaries run but no data is received
+
+- Ensure publisher and subscriber use the **same** `mw_com_config.json`.
+- Both processes must run as the **same user** (shared memory permissions).
+- On a remote target: verify the config was deployed to `etc/mw_com_config.json` relative to
+  the working directory, and run from inside the deploy directory:
+  ```bash
+  cd ~/score_pubsub && ./publisher etc/mw_com_config.json
+  ```
+
+### Shared library not found on target (`error while loading shared libraries`)
+
+The `libmw_com.so` was not installed to a system library path. Either:
+
+```bash
+# Option A — install system-wide (requires sudo on target)
+sudo cp libmw_com.so /usr/local/lib/
+sudo ldconfig
+
+# Option B — set LD_LIBRARY_PATH at runtime
+LD_LIBRARY_PATH=~/score_pubsub ./publisher etc/mw_com_config.json
+```
+

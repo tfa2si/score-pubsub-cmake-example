@@ -29,30 +29,37 @@ if [[ -z "${BAZEL_CPU:-}" ]]; then
 fi
 
 
-# Parse --cpu argument if present, default to arm64 if not set
+# Parse --cpu and --no-clean arguments
 BAZEL_CPU=""
+SKIP_BAZEL_CLEAN=0
 OTHER_ARGS=()
 for arg in "$@"; do
     if [[ "$arg" == --cpu=* ]]; then
         BAZEL_CPU="--cpu=arm64"  # This line is modified to always use aarch64
+    elif [[ "$arg" == --no-clean ]]; then
+        SKIP_BAZEL_CLEAN=1
     else
         OTHER_ARGS+=("$arg")
     fi
 done
 
-# Remove --cpu from positional parameters
+# Remove --cpu/--no-clean from positional parameters
 set -- "${OTHER_ARGS[@]}"
 
 # Set ARM64 platform flags only when --cpu=arm64 was requested
+# --copt=-fPIC is required to build a shared library from these objects;
+# it is harmless for static linking.
 if [[ -n "$BAZEL_CPU" ]]; then
     BAZEL_CPU="--cpu=arm64"
     BAZEL_PLAT="--platforms=//platforms:rpi5_aarch64"
     BAZEL_CROSSTOOL=""
     BAZEL_COMPILER=""
+    BAZEL_FPIC="--copt=-fPIC"
 else
     BAZEL_PLAT=""
     BAZEL_CROSSTOOL=""
     BAZEL_COMPILER=""
+    BAZEL_FPIC="--copt=-fPIC"
 fi
 
 
@@ -92,18 +99,205 @@ get_bazel_out_dir() {
 echo "==> Using communication repository at ${COMM_REPO}"
 echo "==> Sysroot target     : ${SCORE_MW_SYSROOT}"
 
+# ---------------------------------------------------------------------------
+# 0. Apply cross-compilation patches to the comm repo (idempotent)
+# ---------------------------------------------------------------------------
+SCORE_BASELIBS="${SCRIPT_DIR}/../score_forks/score_baselibs"
+
+echo "==> Applying cross-compilation patches to comm repo ..."
+
+# 0a. platforms/ — defines //platforms:rpi5_aarch64
+if [[ ! -d "${COMM_REPO}/platforms" ]]; then
+    SRC_PLATFORMS=""
+    for candidate in \
+        "${SCRIPT_DIR}/../hello_world_bazel_cross_comp/platforms" \
+        "${SCRIPT_DIR}/../bazel_cross_comp_test/platforms" \
+        "${SCRIPT_DIR}/../test/communication/platforms"; do
+        [[ -d "$candidate" ]] && SRC_PLATFORMS="$candidate" && break
+    done
+    if [[ -n "$SRC_PLATFORMS" ]]; then
+        cp -r "$SRC_PLATFORMS" "${COMM_REPO}/platforms"
+        echo "    platforms/ copied from ${SRC_PLATFORMS}"
+    else
+        echo "    WARNING: could not find a platforms/ directory to copy"
+    fi
+fi
+
+# 0b. toolchain/ — provides //toolchain:arm64_linux_gcc_toolchain_entry
+if [[ ! -f "${COMM_REPO}/toolchain/cc_toolchain_config.bzl" ]]; then
+    SRC_TOOLCHAIN=""
+    for candidate in \
+        "${SCRIPT_DIR}/../test/communication/toolchain" \
+        "${SCRIPT_DIR}/../hello_world_bazel_cross_comp/toolchain"; do
+        [[ -f "${candidate}/cc_toolchain_config.bzl" ]] && SRC_TOOLCHAIN="$candidate" && break
+    done
+    if [[ -n "$SRC_TOOLCHAIN" ]]; then
+        mkdir -p "${COMM_REPO}/toolchain"
+        cp -r "${SRC_TOOLCHAIN}/." "${COMM_REPO}/toolchain/"
+        echo "    toolchain/ copied from ${SRC_TOOLCHAIN}"
+    else
+        echo "    WARNING: could not find a toolchain/ directory to copy"
+    fi
+fi
+
+# 0c. local_libs/ — local ACL library
+if [[ ! -d "${COMM_REPO}/local_libs" ]]; then
+    for candidate in \
+        "${SCRIPT_DIR}/../test/communication/local_libs"; do
+        if [[ -d "$candidate" ]]; then
+            cp -r "$candidate" "${COMM_REPO}/local_libs"
+            echo "    local_libs/ copied from ${candidate}"
+            break
+        fi
+    done
+fi
+
+# 0d. MODULE.bazel — register cross toolchain + platforms + local overrides
+# Use Python to do the insert so we avoid shell quoting / newline issues.
+SCORE_BASELIBS_ABS="$(realpath "${SCORE_BASELIBS}" 2>/dev/null || echo "${SCORE_BASELIBS}")"
+python3 - "${COMM_REPO}/MODULE.bazel" "${SCORE_BASELIBS_ABS}" <<'PYEOF'
+import sys, os
+path, baselibs = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    src = f.read()
+
+needs_toolchain = 'arm64_linux_gcc_toolchain_entry' not in src
+needs_baselibs  = 'module_name = "score_baselibs"' not in src
+
+if not needs_toolchain and not needs_baselibs:
+    sys.exit(0)
+
+block = ""
+if needs_toolchain:
+    block += """
+# Register minimal cross toolchain and platforms
+register_toolchains("//toolchain:arm64_linux_gcc_toolchain_entry")
+register_execution_platforms("//platforms:local_x86_64", "//platforms:rpi5_aarch64")"""
+
+if needs_baselibs and os.path.isdir(baselibs):
+    block += """
+
+# Override score_baselibs with local fork
+local_path_override(
+    module_name = "score_baselibs",
+    path = \"""" + baselibs + """\",
+)
+
+# Make local_acl visible to all modules (including score_baselibs)
+bazel_dep(name = "local_acl", version = "1.0")
+local_path_override(
+    module_name = "local_acl",
+    path = "./local_libs/acl",
+)"""
+
+anchor = 'module(name = "score_communication")'
+idx = src.find(anchor)
+if idx == -1:
+    print("    MODULE.bazel: anchor not found, skipping"); sys.exit(0)
+
+end = idx + len(anchor)
+src = src[:end] + block + src[end:]
+with open(path, 'w') as f:
+    f.write(src)
+print("    MODULE.bazel: patched OK")
+PYEOF
+
+# 0e. .bazelrc — suppress deprecated-declarations warning-as-error
+if ! grep -q 'Wno-error=deprecated-declarations' "${COMM_REPO}/.bazelrc" 2>/dev/null; then
+    echo 'build --copt=-Wno-error=deprecated-declarations' >> "${COMM_REPO}/.bazelrc"
+    echo "    .bazelrc: added -Wno-error=deprecated-declarations"
+fi
+
+# 0f. tracing_runtime.cpp — replace StdVariantType with direct field assignment
+TRACING="${COMM_REPO}/score/mw/com/impl/bindings/lola/tracing/tracing_runtime.cpp"
+if grep -q 'StdVariantType element_variant' "$TRACING" 2>/dev/null; then
+    python3 - "$TRACING" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path) as f:
+    src = f.read()
+old = re.search(r'// Compute element variant.*?return ServiceInstanceElement\{[^}]+\};', src, re.DOTALL)
+if not old:
+    print("    tracing_runtime.cpp: pattern not found, skipping")
+    sys.exit(0)
+new_code = '''    ServiceInstanceElement output_service_instance_element{};
+    if (service_element_type == impl::ServiceElementType::EVENT)
+    {
+        const auto lola_event_id = lola_service_type_deployment->events_.at(std::string{service_element_name});
+        output_service_instance_element.element_id = static_cast<ServiceInstanceElement::EventIdType>(lola_event_id);
+    }
+    else if (service_element_type == impl::ServiceElementType::FIELD)
+    {
+        const auto lola_field_id = lola_service_type_deployment->fields_.at(std::string{service_element_name});
+        output_service_instance_element.element_id = static_cast<ServiceInstanceElement::FieldIdType>(lola_field_id);
+    }
+    else
+    {
+        score::mw::log::LogFatal("lola") << "Service element type: " << service_element_type
+                                         << " is invalid. Terminating.";
+        std::terminate();
+    }
+
+    output_service_instance_element.service_id =
+        static_cast<ServiceInstanceElement::ServiceIdType>(lola_service_type_deployment->service_id_);
+
+    if (!lola_service_instance_deployment->instance_id_.has_value())
+    {
+        score::mw::log::LogFatal("lola")
+            << "Tracing should not be done on service element without configured instance ID. Terminating.";
+        std::terminate();
+    }
+    output_service_instance_element.instance_id = static_cast<ServiceInstanceElement::InstanceIdType>(
+        lola_service_instance_deployment->instance_id_.value().GetId());
+
+    const auto version = ServiceIdentifierTypeView{service_identifier}.GetVersion();
+    output_service_instance_element.major_version = ServiceVersionTypeView{version}.getMajor();
+    output_service_instance_element.minor_version = ServiceVersionTypeView{version}.getMinor();
+    return output_service_instance_element;'''
+src = src[:old.start()] + new_code + src[old.end():]
+with open(path, 'w') as f:
+    f.write(src)
+print("    tracing_runtime.cpp: patched OK")
+PYEOF
+fi
+
+# 0g. flag_file.cpp — use ResultBlank instead of Result<void> for local vars
+FLAG_FILE="${COMM_REPO}/score/mw/com/impl/bindings/lola/service_discovery/flag_file.cpp"
+if grep -q 'score::Result<void> result{}' "$FLAG_FILE" 2>/dev/null; then
+    sed -i \
+        -e 's/score::Result<void> result{}/score::ResultBlank result{}/g' \
+        -e 's/result = Result<void>{}/result = ResultBlank{}/g' \
+        "$FLAG_FILE"
+    echo "    flag_file.cpp: patched ResultBlank"
+fi
+
+# 0h. ipc_bridge BUILD — add console_only_backend dep if missing
+IPC_BUILD="${COMM_REPO}/score/mw/com/example/ipc_bridge/BUILD"
+if [[ -f "$IPC_BUILD" ]] && ! grep -q 'console_only_backend' "$IPC_BUILD"; then
+    sed -i 's|"@score_baselibs//score/mw/log",|"@score_baselibs//score/mw/log",\n        "@score_baselibs//score/mw/log:console_only_backend",|' \
+        "$IPC_BUILD"
+    echo "    ipc_bridge/BUILD: added console_only_backend dep"
+fi
 
 cd "${COMM_REPO}"
 
-# Clean Bazel outputs before cross-compiling to avoid mixing architectures
-
-echo "==> Cleaning previous Bazel build outputs (bazel clean) ..."
+# Set BAZEL_CONFIG first (needed regardless of clean)
 if [[ -n "$BAZEL_CPU" ]]; then
-    bazel clean $BAZEL_CPU $BAZEL_PLAT
-    BAZEL_CONFIG="$BAZEL_CPU $BAZEL_PLAT"
+    BAZEL_CONFIG="$BAZEL_CPU $BAZEL_PLAT $BAZEL_FPIC"
 else
-    bazel clean
-    BAZEL_CONFIG=""
+    BAZEL_CONFIG="$BAZEL_FPIC"
+fi
+
+# Clean Bazel outputs to avoid mixing architectures (skip with --no-clean)
+if [[ $SKIP_BAZEL_CLEAN -eq 0 ]]; then
+    echo "==> Cleaning previous Bazel build outputs (bazel clean) ..."
+    if [[ -n "$BAZEL_CPU" ]]; then
+        bazel clean $BAZEL_CPU $BAZEL_PLAT
+    else
+        bazel clean
+    fi
+else
+    echo "==> Skipping Bazel cache clean (--no-clean)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -125,6 +319,7 @@ bazel build $BAZEL_CONFIG \
     @score_baselibs//score/mw/log/detail:console_only_recorder_factory \
     @score_baselibs//score/memory/shared:shared_memory_factory_impl \
     @score_baselibs//score/memory/shared:shared_memory_factory \
+    @score_baselibs//score/os/utils:path \
     //score/mw/com/impl/plumbing:proxy_binding_factory_impl \
     //score/mw/com/impl/plumbing:skeleton_binding_factory_impl \
     //score/mw/com/impl/bindings/lola:path_builder \
@@ -190,6 +385,33 @@ fi
 echo "    Created ${FAT_ARCHIVE} ($(du -sh "${FAT_ARCHIVE}" | cut -f1))"
 
 # ---------------------------------------------------------------------------
+# 2b. Build shared library libmw_com.so from the fat archive
+#     Extract all objects to a temp dir first — ar x deduplicates by basename
+#     (later extraction overwrites earlier ones), avoiding multiple-definition
+#     errors that arise from --whole-archive on a fat archive with duplicates.
+# ---------------------------------------------------------------------------
+SHARED_LIB="${LIB_DIR}/libmw_com.so"
+echo "==> Building ${SHARED_LIB} ..."
+if [[ -n "$BAZEL_CPU" ]]; then
+    SHARED_LINKER="aarch64-linux-gnu-gcc"
+else
+    SHARED_LINKER="gcc"
+fi
+TMPOBJ="$(mktemp -d)"
+(cd "$TMPOBJ" && ar x "${FAT_ARCHIVE}")
+# recorder_factory.o duplicates all symbols already in console_only_recorder_factory.o;
+# remove it to avoid multiple-definition errors when linking the shared library.
+rm -f "$TMPOBJ/recorder_factory.o"
+# Use --whole-archive so all symbols are included, --allow-multiple-definition to
+# suppress any remaining duplicate-symbol errors (first definition wins).
+"${SHARED_LINKER}" -shared -o "${SHARED_LIB}" \
+    -Wl,--whole-archive "${FAT_ARCHIVE}" -Wl,--no-whole-archive \
+    -Wl,--allow-multiple-definition \
+    -lacl
+rm -rf "$TMPOBJ"
+echo "    Created ${SHARED_LIB} ($(du -sh "${SHARED_LIB}" | cut -f1))"
+
+# ---------------------------------------------------------------------------
 # 3. Install headers
 # ---------------------------------------------------------------------------
 INCLUDE_DIR="${SCORE_MW_SYSROOT}/include"
@@ -251,7 +473,7 @@ CMAKE_DIR="${SCORE_MW_SYSROOT}/lib/cmake/MwCom"
 mkdir -p "${CMAKE_DIR}"
 
 cat > "${CMAKE_DIR}/MwComConfig.cmake" << 'EOF'
-# MwComConfig.cmake — imported target for score::mw::com
+# MwComConfig.cmake — imported targets for score::mw::com (static + shared)
 cmake_minimum_required(VERSION 3.16)
 
 get_filename_component(_MWCOM_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
@@ -260,6 +482,15 @@ if(NOT TARGET score::mw::com)
     add_library(score::mw::com STATIC IMPORTED GLOBAL)
     set_target_properties(score::mw::com PROPERTIES
         IMPORTED_LOCATION             "${_MWCOM_ROOT}/lib/libmw_com.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_MWCOM_ROOT}/include"
+        INTERFACE_LINK_LIBRARIES      "acl"
+    )
+endif()
+
+if(EXISTS "${_MWCOM_ROOT}/lib/libmw_com.so" AND NOT TARGET score::mw::com::shared)
+    add_library(score::mw::com::shared SHARED IMPORTED GLOBAL)
+    set_target_properties(score::mw::com::shared PROPERTIES
+        IMPORTED_LOCATION             "${_MWCOM_ROOT}/lib/libmw_com.so"
         INTERFACE_INCLUDE_DIRECTORIES "${_MWCOM_ROOT}/include"
         INTERFACE_LINK_LIBRARIES      "acl"
     )
@@ -274,17 +505,12 @@ echo "    ${SCORE_MW_SYSROOT}/"
 echo "    ├── include/          (headers)"
 echo "    └── lib/"
 echo "        ├── libmw_com.a   (fat static library)"
+echo "        ├── libmw_com.so  (shared library)"
 echo "        └── cmake/MwCom/MwComConfig.cmake"
 echo ""
-echo "Build your app:"
-echo "    cd build"
-if [[ -n "$BAZEL_CPU" ]]; then
-    echo "    # Cross-compilation (e.g. ARM/aarch64):"
-    echo "    cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-arm64.cmake -DCMAKE_PREFIX_PATH=${SCORE_MW_SYSROOT} .."
-else
-    echo "    cmake -DCMAKE_PREFIX_PATH=${SCORE_MW_SYSROOT} ${SCRIPT_DIR}/.."
-fi
-echo "    make -j\$(nproc)"
+echo "    Note: when using the shared library, copy libmw_com.so to the target device:"
+echo "      scp ${SCORE_MW_SYSROOT}/lib/libmw_com.so <user>@<target>:/usr/local/lib/"
+echo "      ssh <user>@<target> ldconfig"
 
 
 
